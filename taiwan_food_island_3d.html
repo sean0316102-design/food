@@ -1,0 +1,848 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>臺灣美食地圖島 3D | 交通部觀光署主題特展</title>
+
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        matcha: {
+                            50: '#f4f7f4',
+                            100: '#e3ebe3',
+                            300: '#b8ccb8',
+                            500: '#8aa889',
+                            700: '#5a755a',
+                            900: '#344534'
+                        },
+                        morandi: {
+                            cream: '#f7f4ef',
+                            sand: '#e6dfd5',
+                            blue: '#8fa4b3',
+                            warmGray: '#99928a',
+                            clay: '#c39b8b',
+                            darkNavy: '#2b353b'
+                        }
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'Microsoft JhengHei', 'PingFang TC', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
+
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+    <!-- Three.js & Libraries -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/gsap.min.js"></script>
+
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            user-select: none;
+            background-color: #dce5eb;
+            transition: background-color 0.8s ease;
+        }
+
+        #canvas-container {
+            width: 100vw;
+            height: 100vh;
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 1;
+        }
+
+        /* Morandi Glassmorphism */
+        .morandi-panel {
+            background: rgba(247, 244, 239, 0.82);
+            backdrop-filter: blur(14px);
+            -webkit-backdrop-filter: blur(14px);
+            border: 1px solid rgba(255, 255, 255, 0.6);
+            box-shadow: 0 15px 35px rgba(43, 53, 59, 0.08);
+        }
+
+        .dark .morandi-panel {
+            background: rgba(43, 53, 59, 0.85);
+            backdrop-filter: blur(14px);
+            -webkit-backdrop-filter: blur(14px);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            color: #f7f4ef;
+        }
+
+        /* 3D Pin Overlay */
+        .marker-pin {
+            position: absolute;
+            transform: translate(-50%, -100%);
+            cursor: pointer;
+            transition: transform 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275), opacity 0.3s;
+            z-index: 10;
+        }
+
+        .marker-pin:hover {
+            transform: translate(-50%, -115%) scale(1.12);
+        }
+
+        .marker-pin.active {
+            transform: translate(-50%, -120%) scale(1.2);
+        }
+
+        @keyframes soft-pulse {
+            0% { transform: scale(0.7); opacity: 0.8; }
+            100% { transform: scale(1.4); opacity: 0; }
+        }
+
+        .pulse-effect::before {
+            content: '';
+            position: absolute;
+            inset: -4px;
+            border-radius: 9999px;
+            background-color: rgba(138, 168, 137, 0.5);
+            animation: soft-pulse 2s cubic-bezier(0.215, 0.61, 0.355, 1) infinite;
+            z-index: -1;
+        }
+
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+    </style>
+</head>
+<body class="font-sans antialiased text-morandi-darkNavy dark:text-morandi-cream">
+
+    <!-- 3D WebGL Canvas Container -->
+    <div id="canvas-container"></div>
+
+    <!-- UI Overlay Layer -->
+    <div id="ui-layer" class="relative z-20 pointer-events-none w-full h-screen flex flex-col justify-between p-4 sm:p-6 overflow-hidden">
+        
+        <!-- Header Nav -->
+        <header class="flex flex-col md:flex-row justify-between items-center gap-4 w-full max-w-7xl mx-auto pointer-events-auto">
+            <!-- Title Card -->
+            <div class="morandi-panel rounded-2xl px-5 py-3 flex items-center gap-3">
+                <div class="w-10 h-10 rounded-xl bg-matcha-500 flex items-center justify-center text-white text-lg shadow-sm">
+                    <i class="fa-solid fa-compass"></i>
+                </div>
+                <div>
+                    <h1 class="text-lg font-bold tracking-wide flex items-center gap-2">
+                        臺灣美食地圖島 3D
+                        <span class="text-xs px-2 py-0.5 rounded-md bg-matcha-100 text-matcha-700 dark:bg-matcha-900/60 dark:text-matcha-300">
+                            觀光署雙語網精選
+                        </span>
+                    </h1>
+                    <p class="text-xs text-morandi-warmGray dark:text-slate-400">探索臺灣在地經典小吃與文化風味</p>
+                </div>
+            </div>
+
+            <!-- Regional Filter -->
+            <div class="morandi-panel rounded-full p-1.5 flex items-center gap-1 overflow-x-auto max-w-full no-scrollbar shadow-sm">
+                <button onclick="filterRegion('all')" class="filter-btn active px-4 py-1.5 rounded-full text-xs font-medium transition-all bg-matcha-500 text-white shadow-sm">
+                    全台精選
+                </button>
+                <button onclick="filterRegion('north')" class="filter-btn px-4 py-1.5 rounded-full text-xs font-medium transition-all hover:bg-matcha-100 dark:hover:bg-slate-800">
+                    北部地區
+                </button>
+                <button onclick="filterRegion('central')" class="filter-btn px-4 py-1.5 rounded-full text-xs font-medium transition-all hover:bg-matcha-100 dark:hover:bg-slate-800">
+                    中部地區
+                </button>
+                <button onclick="filterRegion('south')" class="filter-btn px-4 py-1.5 rounded-full text-xs font-medium transition-all hover:bg-matcha-100 dark:hover:bg-slate-800">
+                    南部地區
+                </button>
+                <button onclick="filterRegion('east')" class="filter-btn px-4 py-1.5 rounded-full text-xs font-medium transition-all hover:bg-matcha-100 dark:hover:bg-slate-800">
+                    東部地區
+                </button>
+            </div>
+        </header>
+
+        <!-- Right Tool Controls -->
+        <div class="fixed right-4 sm:right-6 top-24 sm:top-28 flex flex-col gap-2.5 pointer-events-auto z-30">
+            <button onclick="cycleLighting()" id="light-btn" class="morandi-panel w-11 h-11 rounded-xl flex items-center justify-center hover:scale-105 transition-all shadow-sm group" title="切換時間與氛圍">
+                <i class="fa-solid fa-sun text-matcha-700 dark:text-amber-300 text-base group-hover:rotate-45 transition-transform duration-300" id="light-icon"></i>
+            </button>
+            <button onclick="resetCamera()" class="morandi-panel w-11 h-11 rounded-xl flex items-center justify-center hover:scale-105 transition-all shadow-sm" title="重置視角">
+                <i class="fa-solid fa-rotate-left text-base text-morandi-darkNavy dark:text-morandi-cream"></i>
+            </button>
+            <button onclick="toggleAutoRotate()" id="rotate-btn" class="morandi-panel w-11 h-11 rounded-xl flex items-center justify-center hover:scale-105 transition-all shadow-sm" title="自動旋轉島嶼">
+                <i class="fa-solid fa-circle-notch text-base text-morandi-darkNavy dark:text-morandi-cream"></i>
+            </button>
+        </div>
+
+        <!-- Dynamic 3D Floating Markers -->
+        <div id="markers-container" class="absolute inset-0 pointer-events-none"></div>
+
+        <!-- Food Popup Card (Tourism Bureau Styled) -->
+        <div id="food-card" class="morandi-panel fixed bottom-6 left-1/2 -translate-x-1/2 md:translate-x-0 md:left-auto md:right-6 w-[92%] max-w-md rounded-3xl p-5 pointer-events-auto transition-all duration-500 transform translate-y-full opacity-0 shadow-xl z-40">
+            <button onclick="closeFoodCard()" class="absolute top-3.5 right-3.5 w-7 h-7 rounded-full bg-morandi-sand/50 dark:bg-slate-700/60 flex items-center justify-center text-morandi-darkNavy dark:text-slate-300 hover:bg-morandi-sand transition-colors">
+                <i class="fa-solid fa-xmark text-sm"></i>
+            </button>
+
+            <!-- Food Image Banner -->
+            <div class="relative w-full h-40 rounded-2xl overflow-hidden mb-4 shadow-sm bg-morandi-sand/30">
+                <img id="card-img" src="" alt="美食圖片" class="w-full h-full object-cover transition-transform duration-700 hover:scale-105" onerror="this.src='https://placehold.co/600x400/8aa889/ffffff?text=Taiwan+Food';">
+                <span id="card-region" class="absolute bottom-2.5 left-2.5 px-3 py-1 rounded-full text-xs font-semibold bg-morandi-cream/90 text-matcha-900 backdrop-blur-md shadow-sm">
+                    臺北市
+                </span>
+            </div>
+
+            <div class="flex items-center gap-2">
+                <span id="card-icon" class="text-2xl">🍜</span>
+                <h2 id="card-title" class="text-xl font-bold text-morandi-darkNavy dark:text-morandi-cream">
+                    牛肉麵
+                </h2>
+            </div>
+
+            <p id="card-desc" class="text-xs sm:text-sm text-morandi-warmGray dark:text-slate-300 mt-2.5 leading-relaxed">
+                經典紅燒濃郁湯頭，搭配燉煮軟嫩至極的半筋半肉，是全臺灣代表性的傳統美食之一。
+            </p>
+
+            <div class="mt-4 pt-3 border-t border-morandi-sand/60 dark:border-slate-700/60 flex items-center justify-between text-xs">
+                <div class="flex items-center gap-1.5 text-matcha-700 dark:text-matcha-300 font-medium">
+                    <i class="fa-solid fa-utensils"></i>
+                    <span id="card-tag">觀光署雙語網推薦</span>
+                </div>
+                <button onclick="focusSelectedFood()" class="px-3.5 py-1.5 rounded-xl bg-matcha-500 text-white font-medium hover:bg-matcha-700 transition-colors shadow-sm">
+                    特寫觀賞 <i class="fa-solid fa-magnifying-glass-plus ml-1 text-xs"></i>
+                </button>
+            </div>
+        </div>
+
+        <!-- Footer Info -->
+        <footer class="w-full max-w-7xl mx-auto flex justify-between items-end text-xs text-morandi-warmGray dark:text-slate-400 pointer-events-none">
+            <div class="morandi-panel px-3.5 py-1.5 rounded-lg pointer-events-auto hidden sm:block">
+                <i class="fa-solid fa-hand-pointer mr-1 text-matcha-500"></i> 滑鼠左鍵拖曳旋轉 / 滾輪縮放
+            </div>
+            <div class="morandi-panel px-3.5 py-1.5 rounded-lg pointer-events-auto">
+                <span>資料來源：交通部觀光署雙語網 (taiwan.net.tw)</span>
+            </div>
+        </footer>
+    </div>
+
+    <!-- Main Logic Script -->
+    <script>
+        // --- DATA: Official Taiwan Food Data with Images & Descriptions ---
+        const FOOD_SPOTS = [
+            {
+                id: 'taipei-beef-noodle',
+                name: '牛肉麵',
+                region: 'north',
+                regionName: '臺北市',
+                icon: '🍜',
+                pos: { x: 0.8, y: 1.4, z: -2.8 },
+                desc: '牛肉麵是臺灣極具代表性的道地美食。濃郁紅燒湯頭燉煮半筋半肉，配上香Ｑ大骨高湯與酸菜，口感香濃順口，風靡海內外遊客。',
+                tag: '經典大眾小吃 / 國際盛譽',
+                color: '#8aa889',
+                img: 'https://images.unsplash.com/photo-1582878826629-29b7ad1cdc43?auto=format&fit=crop&w=600&q=80'
+            },
+            {
+                id: 'taipei-xiaolongbao',
+                name: '小籠包',
+                region: 'north',
+                regionName: '臺北市',
+                icon: '🥟',
+                pos: { x: 0.3, y: 1.35, z: -2.2 },
+                desc: '皮薄陷多、汁鮮味美的小籠包，精準的黃金摺數包裹著鮮嫩豬肉與香濃湯汁，咬下一口湯汁爆開，是國際旅客訪臺必嚐經典。',
+                tag: '薄皮爆汁 / 米其林推介',
+                color: '#c39b8b',
+                img: 'https://images.unsplash.com/photo-1563245372-f21724e3856d?auto=format&fit=crop&w=600&q=80'
+            },
+            {
+                id: 'keelung-dingbianzuo',
+                name: '基隆鼎邊趖',
+                region: 'north',
+                regionName: '基隆市',
+                icon: '🍲',
+                pos: { x: 1.6, y: 1.45, z: -3.4 },
+                desc: '鼎邊趖是基隆廟口名小吃，將米漿沿著熱鍋邊舀入燙熟切條，搭配金勾蝦、高麗菜、魷魚與肉羹熬製的清甜湯頭，口感Ｑ彈有勁。',
+                tag: '廟口百年老店 / 海味傳統',
+                color: '#8fa4b3',
+                img: 'https://images.unsplash.com/photo-1569718212165-3a8278d5f624?auto=format&fit=crop&w=600&q=80'
+            },
+            {
+                id: 'yilan-scallion',
+                name: '三星蔥油餅',
+                region: 'east',
+                regionName: '宜蘭縣',
+                icon: '🥙',
+                pos: { x: 2.3, y: 1.3, z: -1.6 },
+                desc: '採用宜蘭在地三星蔥製作，金黃酥脆的餅皮包覆滿滿多汁的鮮甜青蔥，一口咬下外酥內軟，爆發出極致香濃的青蔥原味。',
+                tag: '在地青蔥 / 爆汁酥脆',
+                color: '#6b8e23',
+                img: 'https://images.unsplash.com/photo-1626804475297-41608ea09aeb?auto=format&fit=crop&w=600&q=80'
+            },
+            {
+                id: 'taichung-boba',
+                name: '珍珠奶茶',
+                region: 'central',
+                regionName: '臺中市',
+                icon: '🧋',
+                pos: { x: -0.6, y: 1.2, z: -0.8 },
+                desc: '發源於臺中的國際級名飲。濃郁奶茶與黑糖熬煮的軟Ｑ波霸珍珠完美結合，現已風靡全球，成為臺灣手搖茶飲文化最佳代言。',
+                tag: '風靡全球 / 原創茶飲',
+                color: '#d4a373',
+                img: 'https://images.unsplash.com/photo-1558857563-b371033873b8?auto=format&fit=crop&w=600&q=80'
+            },
+            {
+                id: 'changhua-bawan',
+                name: '彰化肉圓',
+                region: 'central',
+                regionName: '彰化縣',
+                icon: '🍘',
+                pos: { x: -1.4, y: 1.1, z: 0.4 },
+                desc: '彰化肉圓以地瓜粉製作晶瑩富彈性的外皮，內餡包入香菇與溫體豬肉，經低溫油炸後淋上特製甜辣醬與蒜泥，老字號傳承百年。',
+                tag: '傳統老店 / 特製甜辣醬',
+                color: '#b08968',
+                img: 'https://images.unsplash.com/photo-1541696432-82c6da8ce7bf?auto=format&fit=crop&w=600&q=80'
+            },
+            {
+                id: 'tainan-danzai',
+                name: '臺南擔仔麵',
+                region: 'south',
+                regionName: '臺南市',
+                icon: '🍜',
+                pos: { x: -1.6, y: 1.05, z: 1.6 },
+                desc: '源於府城漁家「度小月」的傳統麵食。一小撮油麵淋上慢火熬煮的香濃肉燥，配上鮮蝦頭高湯、五印醋與蒜泥，風味細緻道地。',
+                tag: '府城古早味 / 度小月歷史',
+                color: '#bc6c25',
+                img: 'https://images.unsplash.com/photo-1617093727343-374698b1b08d?auto=format&fit=crop&w=600&q=80'
+            },
+            {
+                id: 'tainan-coffin',
+                name: '棺材板',
+                region: 'south',
+                regionName: '臺南市',
+                icon: '🍞',
+                pos: { x: -2.0, y: 1.0, z: 2.3 },
+                desc: '臺南獨創的特色西式小吃！將金黃厚片吐司炸至酥脆後挖空，盛入熱騰騰的雞肉海鮮濃湯，口感外酥內濃郁。',
+                tag: '府城創意 / 酥脆濃湯',
+                color: '#dda15e',
+                img: 'https://images.unsplash.com/photo-1509722747041-616f39b57569?auto=format&fit=crop&w=600&q=80'
+            },
+            {
+                id: 'kaohsiung-papaya',
+                name: '高雄木瓜牛奶',
+                region: 'south',
+                regionName: '高雄市',
+                icon: '🥛',
+                pos: { x: -1.2, y: 0.9, z: 3.3 },
+                desc: '嚴選南臺灣成熟優質木瓜搭配優質鮮乳現打，呈現絲滑綿密的香甜口感，是南臺灣熱帶夜市解暑的最佳飲料。',
+                tag: '南國熱帶水果 / 絲滑濃郁',
+                color: '#e9edc9',
+                img: 'https://images.unsplash.com/photo-1553530666-ba11a7da3888?auto=format&fit=crop&w=600&q=80'
+            },
+            {
+                id: 'hualien-bianshi',
+                name: '花蓮扁食',
+                region: 'east',
+                regionName: '花蓮縣',
+                icon: '🥟',
+                pos: { x: 1.8, y: 1.1, z: 1.2 },
+                desc: '花蓮扁食以皮薄如翼、豬肉餡鮮彈著稱。加入大骨高湯與油蔥酥、芹菜末，湯頭清香鮮美，展現花蓮山海間的純粹美味。',
+                tag: '皮薄餡鮮 / 山海清香',
+                color: '#a3b18a',
+                img: 'https://images.unsplash.com/photo-1541832676-9b763b0239ab?auto=format&fit=crop&w=600&q=80'
+            }
+        ];
+
+        // --- GLOBAL THREE.JS VARS ---
+        let scene, camera, renderer, controls;
+        let taiwanGroup, oceanMesh, mascotMesh;
+        let activeSpot = null;
+        let markers = [];
+        let lightStateIndex = 0; // 0: Day, 1: Sunset, 2: Night
+        let dirLight, ambientLight, hemiLight;
+        let isAutoRotating = false;
+
+        // --- INITIALIZATION ---
+        window.onload = function() {
+            initScene();
+            createTaiwanIsland();
+            createOcean();
+            createMascot();
+            createFoodMarkers();
+            setupEventListeners();
+            animate();
+        };
+
+        function initScene() {
+            const container = document.getElementById('canvas-container');
+            
+            // Scene & Soft Morandi Fog
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color('#dce5eb');
+            scene.fog = new THREE.FogExp2('#dce5eb', 0.025);
+
+            // Camera
+            camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(12, 14, 16);
+
+            // Renderer
+            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            renderer.outputEncoding = THREE.sRGBEncoding;
+            container.appendChild(renderer.domElement);
+
+            // Controls
+            controls = new THREE.OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.05;
+            controls.maxPolarAngle = Math.PI / 2 - 0.05;
+            controls.minDistance = 6;
+            controls.maxDistance = 32;
+            controls.target.set(0, 0, 0);
+
+            // Lights
+            ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
+            scene.add(ambientLight);
+
+            hemiLight = new THREE.HemisphereLight(0xe8f0f8, 0x8aa889, 0.4);
+            hemiLight.position.set(0, 20, 0);
+            scene.add(hemiLight);
+
+            dirLight = new THREE.DirectionalLight(0xfff8ee, 1.1);
+            dirLight.position.set(15, 25, 15);
+            dirLight.castShadow = true;
+            dirLight.shadow.mapSize.width = 2048;
+            dirLight.shadow.mapSize.height = 2048;
+            dirLight.shadow.camera.near = 0.5;
+            dirLight.shadow.camera.far = 50;
+            dirLight.shadow.camera.left = -10;
+            dirLight.shadow.camera.right = 10;
+            dirLight.shadow.camera.top = 10;
+            dirLight.shadow.camera.bottom = -10;
+            scene.add(dirLight);
+
+            applyLightingState(0);
+        }
+
+        // --- LOW-POLY TAIWAN ISLAND (PASTORAL MATCHA STYLE) ---
+        function createTaiwanIsland() {
+            taiwanGroup = new THREE.Group();
+
+            // Island Main Base
+            const islandGeo = new THREE.CylinderGeometry(5.2, 5.8, 1.8, 7, 2);
+            
+            const posAttr = islandGeo.attributes.position;
+            for (let i = 0; i < posAttr.count; i++) {
+                const x = posAttr.getX(i);
+                const y = posAttr.getY(i);
+                const z = posAttr.getZ(i);
+
+                let newZ = z * 1.6;
+                let newX = x * 0.75;
+                const taperFactor = 1 - Math.pow(newZ / 8, 2) * 0.3;
+                newX *= Math.max(0.4, taperFactor);
+
+                const jitter = (Math.sin(newX * 3) + Math.cos(newZ * 3)) * 0.22;
+                posAttr.setXYZ(i, newX + jitter, y + (Math.random() * 0.18), newZ);
+            }
+            islandGeo.computeVertexNormals();
+
+            // Pastoral Matcha Terrain Material
+            const terrainMat = new THREE.MeshStandardMaterial({
+                color: 0x8aa889, // Pastoral Matcha Green
+                roughness: 0.85,
+                metalness: 0.05,
+                flatShading: true
+            });
+
+            const mainIsland = new THREE.Mesh(islandGeo, terrainMat);
+            mainIsland.position.y = 0;
+            mainIsland.receiveShadow = true;
+            mainIsland.castShadow = true;
+            taiwanGroup.add(mainIsland);
+
+            // Morandi Soil Layer
+            const soilGeo = new THREE.CylinderGeometry(5.6, 4.2, 1.4, 7);
+            const soilMat = new THREE.MeshStandardMaterial({
+                color: 0x99928a, // Morandi Warm Gray
+                roughness: 0.9,
+                flatShading: true
+            });
+            const soil = new THREE.Mesh(soilGeo, soilMat);
+            soil.position.y = -1.1;
+            soil.scale.set(0.9, 1, 1.5);
+            soil.receiveShadow = true;
+            taiwanGroup.add(soil);
+
+            // Mountain Peaks
+            const mountainMat = new THREE.MeshStandardMaterial({
+                color: 0x5a755a,
+                roughness: 0.9,
+                flatShading: true
+            });
+            const snowMat = new THREE.MeshStandardMaterial({
+                color: 0xf7f4ef,
+                roughness: 0.6,
+                flatShading: true
+            });
+
+            const mountainPositions = [
+                { x: 0.2, z: -2.0, r: 1.2, h: 2.2 },
+                { x: 0.0, z: -0.5, r: 1.5, h: 2.8 },
+                { x: -0.3, z: 1.0, r: 1.3, h: 2.4 },
+                { x: 0.4, z: 2.2, r: 1.1, h: 1.8 }
+            ];
+
+            mountainPositions.forEach(m => {
+                const mGeo = new THREE.ConeGeometry(m.r, m.h, 5);
+                const mountain = new THREE.Mesh(mGeo, mountainMat);
+                mountain.position.set(m.x, 0.9 + m.h / 2, m.z);
+                mountain.castShadow = true;
+                mountain.receiveShadow = true;
+                taiwanGroup.add(mountain);
+
+                if (m.h > 2.0) {
+                    const capGeo = new THREE.ConeGeometry(m.r * 0.4, m.h * 0.3, 5);
+                    const cap = new THREE.Mesh(capGeo, snowMat);
+                    cap.position.set(m.x, 0.9 + m.h * 0.85, m.z);
+                    taiwanGroup.add(cap);
+                }
+            });
+
+            // Trees
+            const treeTrunkMat = new THREE.MeshStandardMaterial({ color: 0x7c6a58, flatShading: true });
+            const treeLeavesMat = new THREE.MeshStandardMaterial({ color: 0x6b8e23, flatShading: true });
+
+            for (let i = 0; i < 26; i++) {
+                const distZ = (Math.random() - 0.5) * 6.5;
+                const distX = (Math.random() - 0.5) * 2.5;
+
+                const treeGroup = new THREE.Group();
+                const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.12, 0.4, 4), treeTrunkMat);
+                trunk.position.y = 0.2;
+                
+                const leaves = new THREE.Mesh(new THREE.DodecahedronGeometry(0.35, 0), treeLeavesMat);
+                leaves.position.y = 0.5;
+                leaves.castShadow = true;
+
+                treeGroup.add(trunk);
+                treeGroup.add(leaves);
+                treeGroup.position.set(distX, 0.9, distZ);
+                treeGroup.scale.setScalar(0.7 + Math.random() * 0.4);
+                taiwanGroup.add(treeGroup);
+            }
+
+            scene.add(taiwanGroup);
+        }
+
+        // --- OCEAN MESH ---
+        function createOcean() {
+            const oceanGeo = new THREE.PlaneGeometry(120, 120, 32, 32);
+            oceanGeo.rotateX(-Math.PI / 2);
+
+            const oceanMat = new THREE.MeshStandardMaterial({
+                color: 0x8fa4b3, // Morandi Blue Ocean
+                roughness: 0.3,
+                metalness: 0.1,
+                transparent: true,
+                opacity: 0.82,
+                flatShading: true
+            });
+
+            oceanMesh = new THREE.Mesh(oceanGeo, oceanMat);
+            oceanMesh.position.y = -0.5;
+            scene.add(oceanMesh);
+        }
+
+        // --- LOW-POLY BOBA MASCOT ---
+        function createMascot() {
+            mascotMesh = new THREE.Group();
+
+            const cupGeo = new THREE.CylinderGeometry(0.3, 0.22, 0.6, 8);
+            const cupMat = new THREE.MeshStandardMaterial({ color: 0xf7f4ef, flatShading: true });
+            const cup = new THREE.Mesh(cupGeo, cupMat);
+            cup.position.y = 0.3;
+            cup.castShadow = true;
+            mascotMesh.add(cup);
+
+            const strawGeo = new THREE.CylinderGeometry(0.03, 0.03, 0.7, 5);
+            const strawMat = new THREE.MeshStandardMaterial({ color: 0xc39b8b });
+            const straw = new THREE.Mesh(strawGeo, strawMat);
+            straw.position.set(0.08, 0.55, 0);
+            straw.rotation.z = -0.2;
+            mascotMesh.add(straw);
+
+            const eyeGeo = new THREE.SphereGeometry(0.04, 6, 6);
+            const eyeMat = new THREE.MeshBasicMaterial({ color: 0x2b353b });
+            const leftEye = new THREE.Mesh(eyeGeo, eyeMat);
+            leftEye.position.set(-0.1, 0.38, 0.26);
+            const rightEye = leftEye.clone();
+            rightEye.position.x = 0.1;
+            mascotMesh.add(leftEye);
+            mascotMesh.add(rightEye);
+
+            mascotMesh.position.set(0.8, 1.2, -2.8);
+            scene.add(mascotMesh);
+        }
+
+        // --- FLOATING HTML MARKERS ---
+        function createFoodMarkers() {
+            const container = document.getElementById('markers-container');
+
+            FOOD_SPOTS.forEach((spot) => {
+                const el = document.createElement('div');
+                el.className = `marker-pin pulse-effect pointer-events-auto flex items-center gap-1.5 px-3 py-1.5 rounded-full shadow-md border border-white/80 text-xs font-semibold backdrop-blur-md transition-transform duration-300`;
+                el.style.backgroundColor = 'rgba(247, 244, 239, 0.95)';
+                el.style.color = '#2b353b';
+                el.innerHTML = `<span>${spot.icon}</span> <span>${spot.name}</span>`;
+                el.setAttribute('data-id', spot.id);
+                el.setAttribute('data-region', spot.region);
+
+                el.onclick = () => selectFoodSpot(spot);
+                container.appendChild(el);
+
+                markers.push({
+                    element: el,
+                    pos: new THREE.Vector3(spot.pos.x, spot.pos.y, spot.pos.z),
+                    data: spot
+                });
+            });
+        }
+
+        function updateMarkersPosition() {
+            const projVector = new THREE.Vector3();
+            
+            markers.forEach(m => {
+                projVector.copy(m.pos);
+                projVector.project(camera);
+
+                const x = (projVector.x * 0.5 + 0.5) * window.innerWidth;
+                const y = (-(projVector.y * 0.5) + 0.5) * window.innerHeight;
+
+                if (projVector.z < 1) {
+                    m.element.style.transform = `translate(-50%, -100%) translate3d(${x}px, ${y}px, 0px)`;
+                    m.element.style.display = 'flex';
+                } else {
+                    m.element.style.display = 'none';
+                }
+            });
+        }
+
+        // --- SELECT FOOD & ANIMATE ---
+        function selectFoodSpot(spot) {
+            activeSpot = spot;
+
+            markers.forEach(m => {
+                if (m.data.id === spot.id) {
+                    m.element.classList.add('active', 'ring-2', 'ring-matcha-500');
+                    m.element.style.backgroundColor = '#8aa889';
+                    m.element.style.color = '#ffffff';
+                } else {
+                    m.element.classList.remove('active', 'ring-2', 'ring-matcha-500');
+                    m.element.style.backgroundColor = 'rgba(247, 244, 239, 0.95)';
+                    m.element.style.color = '#2b353b';
+                }
+            });
+
+            // Mascot Movement
+            gsap.to(mascotMesh.position, {
+                x: spot.pos.x,
+                y: spot.pos.y,
+                z: spot.pos.z,
+                duration: 1.2,
+                ease: "power2.out"
+            });
+
+            gsap.to(mascotMesh.position, {
+                y: spot.pos.y + 0.4,
+                duration: 0.3,
+                repeat: 3,
+                yoyo: true,
+                delay: 0.2,
+                ease: "power1.inOut"
+            });
+
+            // Camera Zoom
+            gsap.to(camera.position, {
+                x: spot.pos.x + 3.2,
+                y: spot.pos.y + 2.8,
+                z: spot.pos.z + 4.2,
+                duration: 1.5,
+                ease: "power3.inOut"
+            });
+
+            gsap.to(controls.target, {
+                x: spot.pos.x,
+                y: spot.pos.y,
+                z: spot.pos.z,
+                duration: 1.5,
+                ease: "power3.inOut"
+            });
+
+            // Update Drawer Card
+            document.getElementById('card-img').src = spot.img;
+            document.getElementById('card-icon').innerText = spot.icon;
+            document.getElementById('card-region').innerText = spot.regionName;
+            document.getElementById('card-title').innerText = spot.name;
+            document.getElementById('card-desc').innerText = spot.desc;
+            document.getElementById('card-tag').innerText = spot.tag;
+
+            const card = document.getElementById('food-card');
+            card.classList.remove('translate-y-full', 'opacity-0');
+            card.classList.add('translate-y-0', 'opacity-100');
+        }
+
+        function closeFoodCard() {
+            const card = document.getElementById('food-card');
+            card.classList.add('translate-y-full', 'opacity-0');
+            card.classList.remove('translate-y-0', 'opacity-100');
+
+            markers.forEach(m => {
+                m.element.classList.remove('active', 'ring-2', 'ring-matcha-500');
+                m.element.style.backgroundColor = 'rgba(247, 244, 239, 0.95)';
+                m.element.style.color = '#2b353b';
+            });
+            activeSpot = null;
+        }
+
+        function focusSelectedFood() {
+            if (!activeSpot) return;
+            gsap.to(camera.position, {
+                x: activeSpot.pos.x + 1.8,
+                y: activeSpot.pos.y + 1.2,
+                z: activeSpot.pos.z + 2.2,
+                duration: 1.0,
+                ease: "power2.out"
+            });
+        }
+
+        // --- REGION FILTERING ---
+        function filterRegion(regionKey) {
+            const buttons = document.querySelectorAll('.filter-btn');
+            buttons.forEach(btn => {
+                if (btn.getAttribute('onclick').includes(regionKey)) {
+                    btn.className = "filter-btn active px-4 py-1.5 rounded-full text-xs font-medium transition-all bg-matcha-500 text-white shadow-sm";
+                } else {
+                    btn.className = "filter-btn px-4 py-1.5 rounded-full text-xs font-medium transition-all hover:bg-matcha-100 dark:hover:bg-slate-800";
+                }
+            });
+
+            markers.forEach(m => {
+                if (regionKey === 'all' || m.data.region === regionKey) {
+                    m.element.style.opacity = '1';
+                    m.element.style.pointerEvents = 'auto';
+                    gsap.fromTo(m.element, { scale: 0.6 }, { scale: 1, duration: 0.4, ease: "back.out(1.5)" });
+                } else {
+                    m.element.style.opacity = '0.2';
+                    m.element.style.pointerEvents = 'none';
+                }
+            });
+
+            if (regionKey === 'all') resetCamera();
+        }
+
+        // --- CAMERA RESET ---
+        function resetCamera() {
+            closeFoodCard();
+            gsap.to(camera.position, {
+                x: 12,
+                y: 14,
+                z: 16,
+                duration: 1.5,
+                ease: "power3.inOut"
+            });
+
+            gsap.to(controls.target, {
+                x: 0,
+                y: 0,
+                z: 0,
+                duration: 1.5,
+                ease: "power3.inOut"
+            });
+        }
+
+        // --- MORANDI DAY / SUNSET / NIGHT CYCLES ---
+        function cycleLighting() {
+            lightStateIndex = (lightStateIndex + 1) % 3;
+            applyLightingState(lightStateIndex);
+        }
+
+        function applyLightingState(index) {
+            const lightIcon = document.getElementById('light-icon');
+            
+            if (index === 0) { // DAY
+                scene.background.set('#dce5eb'); // Soft Slate Sky
+                scene.fog.color.set('#dce5eb');
+                dirLight.color.set('#fff8ee');
+                dirLight.intensity = 1.1;
+                ambientLight.intensity = 0.7;
+                lightIcon.className = 'fa-solid fa-sun text-matcha-700';
+                document.documentElement.classList.remove('dark');
+            } else if (index === 1) { // SUNSET
+                scene.background.set('#e2a98e'); // Morandi Terracotta Sunset
+                scene.fog.color.set('#e2a98e');
+                dirLight.color.set('#ff8c69');
+                dirLight.intensity = 0.95;
+                ambientLight.intensity = 0.5;
+                lightIcon.className = 'fa-solid fa-cloud-sun text-amber-600';
+                document.documentElement.classList.add('dark');
+            } else if (index === 2) { // NIGHT
+                scene.background.set('#2b353b'); // Morandi Navy Night
+                scene.fog.color.set('#2b353b');
+                dirLight.color.set('#8fa4b3');
+                dirLight.intensity = 0.4;
+                ambientLight.intensity = 0.3;
+                lightIcon.className = 'fa-solid fa-moon text-blue-300';
+                document.documentElement.classList.add('dark');
+            }
+        }
+
+        function toggleAutoRotate() {
+            isAutoRotating = !isAutoRotating;
+            controls.autoRotate = isAutoRotating;
+            controls.autoRotateSpeed = 1.2;
+            
+            const btn = document.getElementById('rotate-btn');
+            if (isAutoRotating) {
+                btn.classList.add('bg-matcha-500', 'text-white');
+            } else {
+                btn.classList.remove('bg-matcha-500', 'text-white');
+            }
+        }
+
+        function setupEventListeners() {
+            window.addEventListener('resize', onWindowResize);
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        // --- ANIMATION LOOP ---
+        function animate(time) {
+            requestAnimationFrame(animate);
+            controls.update();
+
+            // Gentle wave dynamics
+            if (oceanMesh) {
+                const pos = oceanMesh.geometry.attributes.position;
+                for (let i = 0; i < pos.count; i++) {
+                    const u = pos.getX(i);
+                    const v = pos.getY(i);
+                    const z = Math.sin(u * 0.4 + time * 0.0018) * 0.12 + Math.cos(v * 0.4 + time * 0.0012) * 0.12;
+                    pos.setZ(i, z);
+                }
+                oceanMesh.geometry.attributes.position.needsUpdate = true;
+            }
+
+            updateMarkersPosition();
+            renderer.render(scene, camera);
+        }
+    </script>
+</body>
+</html>
